@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AsynapRous P2P Login</title>
+    <link rel="stylesheet" href="../static/css/styles.css">
+</head>
+<body class="center-layout">
+    <div class="card">
+        <h2>AsynapRous Network</h2>
+        <p class="subtitle">Log in to your local Backend Node</p>
+
+        <div class="form-group">
+            <label>Backend Port (The port your daemon is listening on)</label>
+            <input type="number" id="nodePort" value="2026" />
+        </div>
+        <div class="form-group">
+            <label>Username</label>
+            <input type="text" id="username" placeholder="user1" />
+        </div>
+        <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="password" placeholder="pass1" />
+        </div>
+        <button onclick="login()">Connect</button>
+        <p id="errMsg" class="error-text" style="display:none;"></p>
+    </div>
+
+    <script>
+        async function login() {
+            const port = document.getElementById("nodePort").value;
+            const u = document.getElementById("username").value;
+            const p = document.getElementById("password").value;
+            const err = document.getElementById("errMsg");
+
+            if (!port || !u || !p) return;
+            err.style.display = 'none';
+
+            localStorage.setItem("node_port", port);
+            localStorage.setItem("username", u);
+
+            try {
+                const res = await fetch(`http://127.0.0.1:${port}/login`, {
+                    method: 'POST',
+                    body: JSON.stringify({username: u, password: p}),
+                });
+                
+                if (res.status === 200) {
+                    const data = await res.json();
+                    const token = data.session_id;
+                    localStorage.setItem("session_token", token);
+
+                    const submitRes = await fetch(`http://127.0.0.1:${port}/submit-info`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ip: "127.0.0.1", port: parseInt(port)})
+                    });
+                    
+                    if (submitRes.status === 200) {
+                        window.location.href = "index.html";
+                    } else {
+                        err.innerText = "Access denied or tracker error.";
+                        err.style.display = 'block';
+                    }
+                } else {
+                    err.innerText = "Invalid credentials!";
+                    err.style.display = 'block';
+                }
+            } catch (error) {
+                err.innerText = "Error: Could not reach Backend Node on Port " + port;
+                err.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+</html>

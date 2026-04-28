@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P AsynapRous Chat</title>
+    <link rel="stylesheet" href="../static/css/styles.css">
+</head>
+<body>
+    <div class="layout">
+        <!-- Sidebar: Khung danh sách mạn lưới P2P -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3>👥 P2P Network</h3>
+                <span id="myUsername" class="badge"></span>
+            </div>
+            
+            <div class="target-selector">
+                <label>Send To:</label>
+                <select id="targetUser">
+                    <option value="ALL">📢 Broadcast (ALL)</option>
+                    <!-- Danh sách danh bạn sẽ nạp vào đây -->
+                </select>
+            </div>
+
+            <ul id="peerList" class="peer-list">
+                <!-- Danh sách các node sẽ được nạp bằng fetch() -->
+            </ul>
+        </aside>
+
+        <!-- Main Window: Khung hiển thị và gửi nhắn -->
+        <main class="chat-area">
+            <header class="chat-header">
+                <h2 id="chatTitle">Direct Chat</h2>
+                <div class="node-info" id="nodeInfo"></div>
+            </header>
+            
+            <div id="messagesContainer" class="messages-container">
+                <!-- Các bong bóng chat -->
+            </div>
+
+            <footer class="chat-input-area">
+                <input type="text" id="msgInput" placeholder="Type a message... (Press Enter to send)" />
+                <button onclick="sendMessage()">Send</button>
+            </footer>
+        </main>
+    </div>
+
+    <!-- Tải logic ứng dụng -->
+    <script src="../static/js/app.js"></script>
+</body>
+</html>
