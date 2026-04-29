@@ -319,14 +319,18 @@ def send_peer(headers, body):
             target_user = payload.get("target")
             msg = payload.get("message")
             
-            # Tra cứu IP/Port từ PEERS đã lưu
-            if target_user not in PEERS:
-                return (json.dumps({"error": "Target user not found"}).encode("utf-8"), json_headers({"Status": "404 Not Found"}))
-            if not PEERS[target_user].get("online", False):
-                return (json.dumps({"error": "Target user is offline"}).encode("utf-8"), json_headers({"Status": "409 Conflict"}))
-            
-            target_ip = PEERS[target_user]["ip"]
-            target_port = PEERS[target_user]["port"]
+            # Ưu tiên lấy IP/Port từ Payload (do UI lấy từ Tracker gửi lên)
+            target_ip = payload.get("target_ip")
+            target_port = payload.get("target_port")
+
+            # Tra cứu IP/Port từ PEERS đã lưu (Fallback)
+            if not target_ip or not target_port:
+                if target_user not in PEERS:
+                    return (json.dumps({"error": "Target user not found"}).encode("utf-8"), json_headers({"Status": "404 Not Found"}))
+                if not PEERS[target_user].get("online", False):
+                    return (json.dumps({"error": "Target user is offline"}).encode("utf-8"), json_headers({"Status": "409 Conflict"}))
+                target_ip = PEERS[target_user]["ip"]
+                target_port = PEERS[target_user]["port"]
             
             # Bắn HTTP PPOST tới đích
             url = f"http://{target_ip}:{target_port}/send-peer"
@@ -362,9 +366,12 @@ def broadcast_peer(headers, body):
     try:
         payload = json.loads(body)
         msg = payload.get("message")
+        ui_peers = payload.get("peers")
         success_count = 0
         
-        for peer_uname, peer_info in PEERS.items():
+        peers_to_use = ui_peers if ui_peers else PEERS
+
+        for peer_uname, peer_info in peers_to_use.items():
             if peer_uname == username:
                 continue # Không gửi cho chính mình
             if not peer_info.get("online", False):

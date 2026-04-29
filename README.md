@@ -73,15 +73,28 @@ Set-Cookie: session_id=123e4567-e89b-12d3-a456-426614174000; Path=/; HttpOnly
 1. Mở Terminal thứ nhất, khởi chạy Proxy Server hỗ trợ Load-Balancing và Forwarding:
    `python start_proxy.py --server-ip 127.0.0.1 --server-port 8080`
 2. Mở Terminal thứ 2, khởi chạy Node mạng P2P cho User 1 (đóng vai trò Tracker + Node 1):
-   `python start_sampleapp.py --server-ip 127.0.0.1 --server-port 2026`
+   `python start_sampleapp.py --server-ip 0.0.0.0 --server-port 2026`
 3. Mở Terminal thứ 3, khởi chạy Node mạng P2P cho User 2 (Node 2):
-   `python start_sampleapp.py --server-ip 127.0.0.1 --server-port 2027`
-4. Mở 2 Tab trình duyệt, truy cập `www/login.html` dưới dạng local file (`file:///.../www/login.html`).
-   - Tab 1: Đăng nhập với `user1` ở port `2026`.
-   - Tab 2: Đăng nhập với `user2` ở port `2027`.
-5. Bạn sẽ được chuyển sang giao diện `index.html`. Hai bên ứng dụng sẽ tự động đồng bộ hoá danh bạ (dùng Tracker API GĐ 3) qua background polling. Bạn có thể chat P2P mượt mà thông qua giao thức HTTP (GĐ 4). Nước cờ Non-blocking Coroutines (GĐ 1) đảo bảo server không bao giờ bị nghẽn!
+   `python start_sampleapp.py --server-ip 0.0.0.0 --server-port 2027`
 
-*(Lưu ý: Proxy đã được configure trong `config/proxy.conf` trỏ `127.0.0.1:8080` tới `127.0.0.1:2026`. Bạn cũng có thể mở Proxy bằng lệnh `curl -v http://127.0.0.1:8080/get-list` để thấy Reverse Proxy hoạt động.)*
+*(Lưu ý: Chạy Node với `0.0.0.0` để hệ thống sẵn sàng giao tiếp liên máy tính qua mạng LAN).*
+
+4. **Cách kiểm tra giao diện Web và Chat P2P:**
+   Nhờ có Web Server phục vụ file tĩnh (GĐ 5), bạn có thể truy cập UI thẳng qua Proxy (hoặc mở trực tiếp file `login.html` tuỳ ý).
+   
+   **Tab 1 (Cửa sổ trình duyệt thường):** Truy cập `http://127.0.0.1:8080/login.html`
+   - **Local Node Address:** `127.0.0.1` và Port `2026`
+   - **Tracker Address:** `127.0.0.1` và Port `2026`
+   - Đăng nhập với `user1`.
+
+   **Tab 2 (Cửa sổ Ẩn danh / Incognito):** Truy cập `http://127.0.0.1:8080/login.html`
+   - **Local Node Address:** `127.0.0.1` và Port `2027`
+   - **Tracker Address:** `127.0.0.1` và Port `2026` (Máy 2026 đóng vai trò làm Tracker)
+   - Đăng nhập với `user2`.
+
+5. Hai bên ứng dụng sẽ tự động đồng bộ hoá danh bạ (dùng Tracker API GĐ 3) qua background polling. Bạn có thể gửi tin nhắn Direct hoặc Broadcast. Các lệnh chat sẽ được Node chủ động gửi ngang hàng (P2P HTTP - GĐ 4) thẳng qua Node của đối phương dựa trên IP/Port đã đăng ký. Kiến trúc Non-blocking Coroutines (GĐ 1) đảm bảo server không bị nghẽn!
+
+*(Lưu ý về Proxy: Proxy đã được configure trong `config/proxy.conf` trỏ `127.0.0.1:8080` tới hai backend là `2026` và `2027`. Bạn có thể dùng `curl -v http://127.0.0.1:8080/get-list` nhiều lần để thấy Reverse Proxy thực hiện Round-Robin chia tải).*
 
 ## License
 

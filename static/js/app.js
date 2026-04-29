@@ -206,10 +206,15 @@ async function sendMessage() {
 
     if (mode === "broadcast") {
         apiUrl = `${nodeUrl}/broadcast-peer`;
-        payload = { message: text };
+        payload = { message: text, peers: knownPeers };
     } else if (!target) {
         alert("Please choose an online peer for direct message.");
         return;
+    } else {
+        if (knownPeers[target]) {
+            payload.target_ip = knownPeers[target].ip;
+            payload.target_port = knownPeers[target].port;
+        }
     }
 
     try {
