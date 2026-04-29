@@ -41,6 +41,8 @@ PROXY_PASS = {
     "app2.local": ('192.168.56.103', 9002),
 }
 
+ROUND_ROBIN_INDEX = {}
+
 
 def forward_request(host, port, request):
     """
@@ -105,15 +107,15 @@ def resolve_routing_policy(hostname, routes):
             # Use a dummy host to raise an invalid connection
             proxy_host = '127.0.0.1'
             proxy_port = '9000'
-        elif len(value) == 1:
+        elif len(proxy_map) == 1:
             proxy_host, proxy_port = proxy_map[0].split(":", 2)
-        #elif: # apply the policy handling 
-        #   proxy_map
-        #   policy
         else:
-            # Out-of-handle mapped host
-            proxy_host = '127.0.0.1'
-            proxy_port = '9000'
+            if policy in ("round-robin", "round"):
+                idx = ROUND_ROBIN_INDEX.get(hostname, 0)
+                proxy_host, proxy_port = proxy_map[idx].split(":", 2)
+                ROUND_ROBIN_INDEX[hostname] = (idx + 1) % len(proxy_map)
+            else:
+                proxy_host, proxy_port = proxy_map[0].split(":", 2)
     else:
         print("[Proxy] resolve route of hostname {} is a singulair to".format(hostname))
         proxy_host, proxy_port = proxy_map.split(":", 2)

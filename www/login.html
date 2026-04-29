@@ -1,23 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AsynapRous P2P Login</title>
     <link rel="stylesheet" href="../static/css/styles.css">
 </head>
+
 <body class="center-layout">
     <div class="card">
         <h2>AsynapRous Network</h2>
         <p class="subtitle">Log in to your local Backend Node</p>
 
         <div class="form-group">
-            <label>Backend Port (The port your daemon is listening on)</label>
-            <input type="number" id="nodePort" value="2026" />
+            <label>Local Node Address (IP & Port of your daemon)</label>
+            <div style="display:flex; gap:10px;">
+                <input type="text" id="nodeIp" value="127.0.0.1" style="flex:2;" />
+                <input type="number" id="nodePort" value="2026" style="flex:1;" />
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Tracker Address (IP & Port of the registry)</label>
+            <div style="display:flex; gap:10px;">
+                <input type="text" id="trackerIp" value="127.0.0.1" style="flex:2;" />
+                <input type="number" id="trackerPort" value="2026" style="flex:1;" />
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Your Public/LAN IP (Others connect to you via this)</label>
+            <input type="text" id="publicIp" value="127.0.0.1" />
         </div>
         <div class="form-group">
             <label>Username</label>
             <input type="text" id="username" placeholder="user1" />
+            <small class="help-text">Allowed accounts: user1, user2, user3</small>
         </div>
         <div class="form-group">
             <label>Password</label>
@@ -28,37 +45,72 @@
     </div>
 
     <script>
+        const ALLOWED_USERS = ["user1", "user2", "user3"];
+
         async function login() {
+            const nodeIp = document.getElementById("nodeIp").value || "127.0.0.1";
             const port = document.getElementById("nodePort").value;
+            const trackerIp = document.getElementById("trackerIp").value || nodeIp;
+            const trackerPort = document.getElementById("trackerPort").value || port;
+            const publicIp = document.getElementById("publicIp").value || nodeIp;
             const u = document.getElementById("username").value;
             const p = document.getElementById("password").value;
             const err = document.getElementById("errMsg");
 
-            if (!port || !u || !p) return;
+            if (!port || !trackerPort || !u || !p) return;
             err.style.display = 'none';
 
+            if (!ALLOWED_USERS.includes(u)) {
+                err.innerText = "Only default accounts are allowed: user1, user2, user3";
+                err.style.display = 'block';
+                return;
+            }
+
+            localStorage.setItem("node_ip", nodeIp);
             localStorage.setItem("node_port", port);
+            localStorage.setItem("tracker_ip", trackerIp);
+            localStorage.setItem("tracker_port", trackerPort);
+            localStorage.setItem("public_ip", publicIp);
             localStorage.setItem("username", u);
 
             try {
-                const res = await fetch(`http://127.0.0.1:${port}/login`, {
+                const res = await fetch(`http://${nodeIp}:${port}/login`, {
                     method: 'POST',
-                    body: JSON.stringify({username: u, password: p}),
+                    body: JSON.stringify({ username: u, password: p }),
                 });
-                
+
                 if (res.status === 200) {
                     const data = await res.json();
                     const token = data.session_id;
                     localStorage.setItem("session_token", token);
 
-                    const submitRes = await fetch(`http://127.0.0.1:${port}/submit-info`, {
+                    let trackerToken = token;
+                    if (trackerIp !== nodeIp || trackerPort !== port) {
+                        const trackerLoginRes = await fetch(`http://${trackerIp}:${trackerPort}/login`, {
+                            method: 'POST',
+                            body: JSON.stringify({ username: u, password: p }),
+                        });
+
+                        if (trackerLoginRes.status !== 200) {
+                            err.innerText = "Tracker login failed.";
+                            err.style.display = 'block';
+                            return;
+                        }
+
+                        const trackerData = await trackerLoginRes.json();
+                        trackerToken = trackerData.session_id;
+                    }
+
+                    localStorage.setItem("tracker_token", trackerToken);
+
+                    const submitRes = await fetch(`http://${trackerIp}:${trackerPort}/submit-info`, {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${token}`
+                            'Authorization': `Bearer ${trackerToken}`
                         },
-                        body: JSON.stringify({ip: "127.0.0.1", port: parseInt(port)})
+                        body: JSON.stringify({ ip: publicIp, port: parseInt(port) })
                     });
-                    
+
                     if (submitRes.status === 200) {
                         window.location.href = "index.html";
                     } else {
@@ -70,10 +122,11 @@
                     err.style.display = 'block';
                 }
             } catch (error) {
-                err.innerText = "Error: Could not reach Backend Node on Port " + port;
+                err.innerText = "Error: Could not reach Backend Node on " + nodeIp + ":" + port;
                 err.style.display = 'block';
             }
         }
     </script>
 </body>
+
 </html>

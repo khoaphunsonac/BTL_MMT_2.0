@@ -14,11 +14,20 @@
                 <h3>👥 P2P Network</h3>
                 <span id="myUsername" class="badge"></span>
             </div>
+
+            <div class="session-actions">
+                <button id="logoutBtn" class="secondary-btn" type="button" onclick="logoutUser()">Logout</button>
+            </div>
+
+            <div class="mode-selector">
+                <label><input type="radio" name="chatMode" value="direct" checked /> Direct</label>
+                <label><input type="radio" name="chatMode" value="broadcast" /> Broadcast</label>
+            </div>
             
             <div class="target-selector">
                 <label>Send To:</label>
                 <select id="targetUser">
-                    <option value="ALL">📢 Broadcast (ALL)</option>
+                    <option value="">Select a peer...</option>
                     <!-- Danh sách danh bạn sẽ nạp vào đây -->
                 </select>
             </div>

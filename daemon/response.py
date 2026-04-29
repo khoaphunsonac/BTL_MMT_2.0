@@ -159,12 +159,12 @@ class Response():
         print("[Response] Processing main_type={} sub_type={}".format(main_type,sub_type))
         if main_type == 'text':
             self.headers['Content-Type']='text/{}'.format(sub_type)
-            if sub_type == 'plain' or sub_type == 'css':
+            if sub_type == 'plain' or sub_type == 'css' or sub_type == 'javascript':
                 base_dir = BASE_DIR+"static/"
             elif sub_type == 'html':
                 base_dir = BASE_DIR+"www/"
             else:
-                handle_text_other(sub_type)
+                print(f"[Response] Unhandled text subtype: {sub_type}")
         elif main_type == 'image':
             base_dir = BASE_DIR+"static/"
             self.headers['Content-Type']='image/{}'.format(sub_type)
@@ -278,7 +278,7 @@ class Response():
                 "Accept-Ranges: bytes\r\n"
                 "Content-Type: text/html\r\n"
                 "Content-Length: 13\r\n"
-                "Cache-Control: max-age=86000\r\n"
+                "Cache-Control: no-cache\r\n"
                 "Connection: close\r\n"
                 "\r\n"
                 "404 Not Found"
@@ -308,8 +308,8 @@ class Response():
             base_dir = self.prepare_content_type(mime_type = 'text/html')
         elif mime_type == 'text/css':
             base_dir = self.prepare_content_type(mime_type = 'text/css')
-        elif mime_type == 'application/json' or mime_type == 'application/octet-stream':
-            base_dir = self.prepare_content_type(mime_type = 'application/json')
+        elif mime_type == 'application/json' or mime_type == 'application/octet-stream' or mime_type == 'application/javascript' or mime_type == 'text/javascript':
+            base_dir = self.prepare_content_type(mime_type = mime_type)
             envelop_content = ""
         else:
             return self.build_notfound()

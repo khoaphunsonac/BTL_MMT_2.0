@@ -110,6 +110,22 @@ class HttpAdapter:
         req.prepare(msg, routes)
         print("[HttpAdapter] Invoke handle_client connection {}".format(addr))
 
+        # Handle preflight in sync mode
+        if req.method == "OPTIONS":
+            resp.status_code = 204
+            resp._content = b""
+            resp.headers = {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                "Access-Control-Max-Age": "86400",
+                "Content-Type": "application/octet-stream",
+            }
+            response = resp.build_response(req)
+            conn.sendall(response)
+            conn.close()
+            return
+
         # Handle request hook
         if req.hook:
             print("[HttpAdapter] Hook detected for {}, executing...".format(req.path))
@@ -162,6 +178,25 @@ class HttpAdapter:
         msg = await reader.read(1024)
 
         req.prepare(msg.decode("utf-8"), routes=self.routes)
+
+        # Handle CORS Preflight
+        if req.method == "OPTIONS":
+            print("[HttpAdapter] Intercepted OPTIONS request for CORS preflight")
+            resp.status_code = 204
+            resp._content = b""
+            resp.headers = {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                "Access-Control-Max-Age": "86400",
+                "Content-Type": "application/octet-stream",
+            }
+            response = resp.build_response(req)
+            writer.write(response)
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            return
 
         # Handle request hook
         if req.hook:
@@ -223,7 +258,7 @@ class HttpAdapter:
         response = Response()
 
         # Set encoding.
-        response.encoding = get_encoding_from_headers(response.headers)
+        response.encoding = "utf-8"
         response.raw = resp
         response.reason = response.raw.reason
 
@@ -233,7 +268,7 @@ class HttpAdapter:
             response.url = req.url
 
         # Add new cookies from the server.
-        response.cookies = extract_cookies(req)
+        response.cookies = self.extract_cookies(req, resp)
 
         # Give the Response some context.
         response.request = req
@@ -321,7 +356,7 @@ class HttpAdapter:
         #       username, password =...
         # we provide dummy auth here
         #
-        username, password = ("user1", "password")
+        username, password = ("user1", "pass1")
 
         if username:
             headers["Proxy-Authorization"] = (username, password)

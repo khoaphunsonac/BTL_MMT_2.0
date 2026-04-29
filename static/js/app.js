@@ -1,56 +1,124 @@
 // Retrieve config from Login pass
+const nodeIp = localStorage.getItem("node_ip") || "127.0.0.1";
 const port = localStorage.getItem("node_port");
+const trackerIp = localStorage.getItem("tracker_ip") || nodeIp;
+const trackerPort = localStorage.getItem("tracker_port") || port;
+const publicIp = localStorage.getItem("public_ip") || nodeIp;
 const token = localStorage.getItem("session_token");
+const trackerToken = localStorage.getItem("tracker_token") || token;
 const username = localStorage.getItem("username");
 
 if (!port || !token) {
     window.location.href = "login.html";
 }
 
-const nodeUrl = `http://127.0.0.1:${port}`;
+const nodeUrl = `http://${nodeIp}:${port}`;
+const trackerUrl = `http://${trackerIp}:${trackerPort}`;
 document.getElementById("myUsername").innerText = "You: " + username;
-document.getElementById("nodeInfo").innerText = "Local Node Port: " + port;
+document.getElementById("nodeInfo").innerText = `Local Node: ${nodeIp}:${port} | Tracker: ${trackerIp}:${trackerPort}`;
+
+const targetSelect = document.getElementById("targetUser");
+const chatTitle = document.getElementById("chatTitle");
+const modeInputs = document.querySelectorAll('input[name="chatMode"]');
+
+let knownPeers = {};
+let peerOnlineMap = {};
+let localNotices = [];
+let lastHistory = [];
+
+function selectedMode() {
+    const checked = document.querySelector('input[name="chatMode"]:checked');
+    return checked ? checked.value : "direct";
+}
+
+function updateChatTitle() {
+    if (selectedMode() === "broadcast") {
+        chatTitle.innerText = "Broadcast Chat";
+        targetSelect.disabled = true;
+        return;
+    }
+
+    targetSelect.disabled = false;
+    const target = targetSelect.value;
+    chatTitle.innerText = target ? `Direct Chat -> ${target}` : "Direct Chat";
+}
+
+function addLocalNotice(text) {
+    localNotices.push({
+        type: "system",
+        message: text,
+        ts: Date.now()
+    });
+
+    if (localNotices.length > 20) {
+        localNotices = localNotices.slice(-20);
+    }
+    renderMessages(lastHistory);
+}
 
 // Fetch Peers List
 async function fetchPeers() {
     try {
-        const res = await fetch(`${nodeUrl}/get-list`, {
-            headers: { 'Authorization': `Bearer ${token}` }
+        const res = await fetch(`${trackerUrl}/get-list`, {
+            headers: { 'Authorization': `Bearer ${trackerToken}` }
         });
         if (res.status === 200) {
             const data = await res.json();
             const peers = data.peers || {};
             
             const peerList = document.getElementById("peerList");
-            const selectList = document.getElementById("targetUser");
+            const selectList = targetSelect;
             
             // Lấy old selected value để không bị mất khi render lại
             const selectedVal = selectList.value;
             
             peerList.innerHTML = "";
-            let selectHtml = `<option value="ALL">📢 Broadcast (ALL)</option>`;
+            let selectHtml = `<option value="">Select a peer...</option>`;
+            const nextPeerOnlineMap = {};
 
             for (const [uname, info] of Object.entries(peers)) {
                 if (uname === username) continue; // Skip self
+
+                const isOnline = info.online !== false;
+                nextPeerOnlineMap[uname] = isOnline;
+                const statusClass = isOnline ? "online" : "offline";
+                const statusText = isOnline ? "online" : "offline";
                 
                 // Add to Sidebar
                 peerList.innerHTML += `
                     <li class="peer-item">
-                        <span class="status-dot"></span>
+                        <span class="status-dot ${statusClass}"></span>
                         <strong>${uname}</strong> 
-                        <span class="muted">(${info.ip}:${info.port})</span>
+                        <span class="muted">(${info.ip || "-"}:${info.port || "-"}) - ${statusText}</span>
                     </li>
                 `;
 
-                // Add to Select Box
-                selectHtml += `<option value="${uname}">👤 ${uname}</option>`;
+                // Direct list chỉ chứa peer online
+                if (isOnline) {
+                    selectHtml += `<option value="${uname}">👤 ${uname}</option>`;
+                }
             }
+
+            for (const uname of Object.keys(nextPeerOnlineMap)) {
+                const oldOnline = peerOnlineMap[uname];
+                const newOnline = nextPeerOnlineMap[uname];
+                if (oldOnline === true && newOnline === false) {
+                    addLocalNotice(`${uname} logged out/offline`);
+                }
+                if (oldOnline === false && newOnline === true) {
+                    addLocalNotice(`${uname} is online`);
+                }
+            }
+
+            peerOnlineMap = nextPeerOnlineMap;
+            knownPeers = peers;
             
             selectList.innerHTML = selectHtml;
             // Khôi phục selected (nếu vẫn còn online)
             if ([...selectList.options].some(o => o.value === selectedVal)) {
                 selectList.value = selectedVal;
             }
+            updateChatTitle();
         }
     } catch (e) {
         console.error("Tracker fetch failed");
@@ -67,12 +135,13 @@ async function fetchMessages() {
         if (res.status === 200) {
             const data = await res.json();
             const history = data.history || [];
+            lastHistory = history;
             
             // Chỉ render nếu có tin nhắn mới
             if (history.length > lastHistoryCount) {
                 lastHistoryCount = history.length;
-                renderMessages(history);
             }
+            renderMessages(history);
         }
     } catch (e) {
         console.error("Messages fetch failed");
@@ -82,10 +151,20 @@ async function fetchMessages() {
 function renderMessages(history) {
     const container = document.getElementById("messagesContainer");
     container.innerHTML = "";
+
+    const mergedMessages = [...history, ...localNotices];
+    mergedMessages.sort((a, b) => (a.ts || 0) - (b.ts || 0));
     
-    history.forEach(msg => {
+    mergedMessages.forEach(msg => {
         const div = document.createElement("div");
         div.className = "message-bubble";
+
+        if (msg.type === "system") {
+            div.classList.add("system");
+            div.innerHTML = `<div class="msg-text">${msg.message}</div>`;
+            container.appendChild(div);
+            return;
+        }
         
         let senderName = msg.from;
         if (msg.type === "direct_sent" || msg.type === "broadcast_sent") {
@@ -119,14 +198,18 @@ async function sendMessage() {
     const text = input.value.trim();
     if (!text) return;
     
-    const target = document.getElementById("targetUser").value;
+    const mode = selectedMode();
+    const target = targetSelect.value;
     
     let apiUrl = `${nodeUrl}/send-peer`;
     let payload = { type: "outbound", target: target, message: text };
 
-    if (target === "ALL") {
+    if (mode === "broadcast") {
         apiUrl = `${nodeUrl}/broadcast-peer`;
         payload = { message: text };
+    } else if (!target) {
+        alert("Please choose an online peer for direct message.");
+        return;
     }
 
     try {
@@ -150,6 +233,61 @@ async function sendMessage() {
     }
 }
 
+async function heartbeat() {
+    try {
+        await fetch(`${trackerUrl}/heartbeat`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${trackerToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ ip: publicIp, port: parseInt(port) })
+        });
+    } catch (e) {
+        // Presence ping best-effort
+    }
+}
+
+async function logoutUser() {
+    try {
+        await fetch(`${trackerUrl}/logout`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${trackerToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ reason: "manual_logout" })
+        });
+    } catch (e) {
+        // Even if request fails, clear local session on UI side.
+    }
+
+    try {
+        if (trackerIp !== nodeIp || trackerPort !== port) {
+            await fetch(`${nodeUrl}/logout`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ reason: "manual_logout" })
+            });
+        }
+    } catch (e) {
+        // Local node logout is best-effort if tracker is separate.
+    }
+
+    localStorage.removeItem("session_token");
+    localStorage.removeItem("tracker_token");
+    localStorage.removeItem("node_ip");
+    localStorage.removeItem("node_port");
+    localStorage.removeItem("tracker_ip");
+    localStorage.removeItem("tracker_port");
+    localStorage.removeItem("public_ip");
+    localStorage.removeItem("username");
+    window.location.href = "login.html";
+}
+
 // Bắt sự kiện Enter input
 document.getElementById("msgInput").addEventListener("keypress", function(event) {
     if (event.key === "Enter") {
@@ -157,8 +295,14 @@ document.getElementById("msgInput").addEventListener("keypress", function(event)
     }
 });
 
+targetSelect.addEventListener("change", updateChatTitle);
+modeInputs.forEach((input) => input.addEventListener("change", updateChatTitle));
+
 // Run Polling
 setInterval(fetchPeers, 3000);
 setInterval(fetchMessages, 2000);
+setInterval(heartbeat, 4000);
 fetchPeers();
 fetchMessages();
+heartbeat();
+updateChatTitle();

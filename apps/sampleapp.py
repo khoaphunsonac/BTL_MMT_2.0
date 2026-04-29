@@ -26,6 +26,7 @@ import urllib.error
 import importlib.util
 import json
 import uuid
+import time
 
 from daemon import AsynapRous
 
@@ -41,26 +42,43 @@ USERS = {
 # Lưu trữ Session ID đang hoạt động
 SESSIONS = {}
 
+
+def cors_headers():
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Max-Age": "86400"
+    }
+
+
+def json_headers(extra=None):
+    headers = {"Content-Type": "application/json"}
+    if extra:
+        headers.update(extra)
+    headers.update(cors_headers())
+    return headers
+
+
+def extract_session_id(headers):
+    """Extract session token from Authorization or Cookie headers."""
+    auth_header = headers.get('authorization', '')
+    if auth_header.startswith("Bearer "):
+        return auth_header.split(" ", 1)[1]
+
+    cookie_header = headers.get('cookie', '')
+    for item in cookie_header.split(';'):
+        if '=' in item:
+            k, v = item.strip().split('=', 1)
+            if k == "session_id":
+                return v
+    return None
+
 def check_auth(headers):
     """
     Helper function để kiểm tra xem cookie/session_id có hợp lệ không.
     """
-    # Trích xuất bearer token từ Authorization (cho UI Frontend)
-    auth_header = headers.get('authorization', '')
-    if auth_header.startswith("Bearer "):
-        session_id = auth_header.split(" ")[1]
-        if session_id in SESSIONS:
-            return SESSIONS[session_id]
-                
-    # Fallback trích xuất từ Cookie
-    cookie_header = headers.get('cookie', '')
-    cookies = {}
-    for item in cookie_header.split(';'):
-        if '=' in item:
-            k, v = item.strip().split('=', 1)
-            cookies[k] = v
-            
-    session_id = cookies.get('session_id')
+    session_id = extract_session_id(headers)
     if session_id and session_id in SESSIONS:
         return SESSIONS[session_id]
     return None
@@ -98,15 +116,20 @@ def login(headers="guest", body="anonymous"):
                 "Set-Cookie": f"session_id={session_id}; Path=/; HttpOnly"
             }
             # Trả về tuple thay vì chỉ nội dung, để daemon/httpadapter có thể đọc được headers
-            return (json_str.encode("utf-8"), custom_headers)
+            return (json_str.encode("utf-8"), json_headers(custom_headers))
         else:
             # Login thất bại
             data = {"error": "Invalid username or password"}
-            return (json.dumps(data).encode("utf-8"), {"Status": "401 Unauthorized"})
+            return (json.dumps(data).encode("utf-8"), json_headers({"Status": "401 Unauthorized"}))
             
     except Exception as e:
         data = {"error": str(e)}
-        return (json.dumps(data).encode("utf-8"), {"Status": "400 Bad Request"})
+        return (json.dumps(data).encode("utf-8"), json_headers({"Status": "400 Bad Request"}))
+
+
+@app.route('/login', methods=['OPTIONS'])
+def login_options(headers, body):
+    return (b"", json_headers({"Status": "204 No Content"}))
 
 @app.route("/echo", methods=["POST"])
 def echo(headers="guest", body="anonymous"):
@@ -117,12 +140,12 @@ def echo(headers="guest", body="anonymous"):
         data = {"received": message }
         # Convert to JSON string
         json_str = json.dumps(data)
-        return (json_str.encode("utf-8"))
+        return (json_str.encode("utf-8"), json_headers())
     except json.JSONDecodeError:
         data = {"error": "Invalid JSON"}
         # Convert to JSON string
         json_str = json.dumps(data)
-        return (json_str.encode("utf-8"))
+        return (json_str.encode("utf-8"), json_headers({"Status": "400 Bad Request"}))
 
 
 @app.route('/hello', methods=['PUT'])
@@ -141,38 +164,113 @@ async def hello(headers, body):
 
     # Convert to JSON string
     json_str = json.dumps(data)
-    return (json_str.encode("utf-8"))
+    return (json_str.encode("utf-8"), json_headers())
 
 # ==========================================
 # PHASE 3: TRACKER SERVER
 # ==========================================
 
 PEERS = {}
+PEER_TIMEOUT_SECONDS = 12
+
+
+def upsert_peer(username, ip=None, port=None, online=True):
+    peer = PEERS.get(username, {})
+    if ip is not None:
+        peer["ip"] = ip
+    if port is not None:
+        peer["port"] = port
+    peer["online"] = online
+    peer["last_seen"] = int(time.time())
+    PEERS[username] = peer
+
+
+def mark_peer_offline(username):
+    if username not in PEERS:
+        return
+    PEERS[username]["online"] = False
+    PEERS[username]["last_seen"] = int(time.time())
 
 @app.route('/submit-info', methods=['POST'])
 def submit_info(headers, body):
     username = check_auth(headers)
     if not username:
-        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), {"Status": "401 Unauthorized", "Content-Type": "application/json"})
+        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), json_headers({"Status": "401 Unauthorized"}))
     
     try:
         payload = json.loads(body)
         ip = payload.get("ip")
         port = payload.get("port")
         if ip and port:
-            PEERS[username] = {"ip": ip, "port": port}
-            return (json.dumps({"message": "Info submitted successfully", "peers": PEERS}).encode("utf-8"), {"Content-Type": "application/json"})
-        return (json.dumps({"error": "Missing ip or port"}).encode("utf-8"), {"Status": "400 Bad Request", "Content-Type": "application/json"})
+            upsert_peer(username, ip, port, online=True)
+            return (json.dumps({"message": "Info submitted successfully", "peers": PEERS}).encode("utf-8"), json_headers())
+        return (json.dumps({"error": "Missing ip or port"}).encode("utf-8"), json_headers({"Status": "400 Bad Request"}))
     except Exception as e:
-        return (json.dumps({"error": "Invalid format"}).encode("utf-8"), {"Status": "400 Bad Request", "Content-Type": "application/json"})
+        return (json.dumps({"error": "Invalid format"}).encode("utf-8"), json_headers({"Status": "400 Bad Request"}))
+
+
+@app.route('/submit-info', methods=['OPTIONS'])
+def submit_info_options(headers, body):
+    return (b"", json_headers({"Status": "204 No Content"}))
+
+
+@app.route('/heartbeat', methods=['POST'])
+def heartbeat(headers, body):
+    username = check_auth(headers)
+    if not username:
+        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), json_headers({"Status": "401 Unauthorized"}))
+
+    try:
+        payload = json.loads(body) if isinstance(body, str) and body.strip() else {}
+    except Exception:
+        payload = {}
+
+    ip = payload.get("ip")
+    port = payload.get("port")
+    upsert_peer(username, ip, port, online=True)
+    return (json.dumps({"status": "ok"}).encode("utf-8"), json_headers())
+
+
+@app.route('/heartbeat', methods=['OPTIONS'])
+def heartbeat_options(headers, body):
+    return (b"", json_headers({"Status": "204 No Content"}))
+
+
+@app.route('/logout', methods=['POST'])
+def logout(headers, body):
+    username = check_auth(headers)
+    if not username:
+        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), json_headers({"Status": "401 Unauthorized"}))
+
+    session_id = extract_session_id(headers)
+    if session_id in SESSIONS:
+        del SESSIONS[session_id]
+
+    mark_peer_offline(username)
+    return (json.dumps({"message": "Logged out"}).encode("utf-8"), json_headers())
+
+
+@app.route('/logout', methods=['OPTIONS'])
+def logout_options(headers, body):
+    return (b"", json_headers({"Status": "204 No Content"}))
 
 @app.route('/get-list', methods=['GET'])
 def get_list(headers, body):
     username = check_auth(headers)
     if not username:
-        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), {"Status": "401 Unauthorized", "Content-Type": "application/json"})
+        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), json_headers({"Status": "401 Unauthorized"}))
     
-    return (json.dumps({"peers": PEERS}).encode("utf-8"), {"Content-Type": "application/json"})
+    now = int(time.time())
+    for uname, info in PEERS.items():
+        if info.get("online") and (now - info.get("last_seen", now) > PEER_TIMEOUT_SECONDS):
+            info["online"] = False
+
+    return (json.dumps({"peers": PEERS}).encode("utf-8"), json_headers())
+
+
+@app.route('/get-list', methods=['OPTIONS'])
+def get_list_options(headers, body):
+    return (b"", json_headers({"Status": "204 No Content"}))
 
 # ==========================================
 # PHASE 4: P2P COMMUNICATION
@@ -189,10 +287,15 @@ def connect_peer(headers, body):
         peer_username = payload.get("username")
         if peer_username:
             ACTIVE_CONNECTIONS.add(peer_username)
-            return (json.dumps({"status": "accepted", "message": f"Hello {peer_username}"}).encode("utf-8"), {"Content-Type": "application/json"})
-        return (json.dumps({"error": "Missing username"}).encode("utf-8"), {"Status": "400 Bad Request", "Content-Type": "application/json"})
+            return (json.dumps({"status": "accepted", "message": f"Hello {peer_username}"}).encode("utf-8"), json_headers())
+        return (json.dumps({"error": "Missing username"}).encode("utf-8"), json_headers({"Status": "400 Bad Request"}))
     except:
-        return (json.dumps({"error": "Invalid JSON mapping"}).encode("utf-8"), {"Status": "400 Bad Request", "Content-Type": "application/json"})
+        return (json.dumps({"error": "Invalid JSON mapping"}).encode("utf-8"), json_headers({"Status": "400 Bad Request"}))
+
+
+@app.route('/connect-peer', methods=['OPTIONS'])
+def connect_peer_options(headers, body):
+    return (b"", json_headers({"Status": "204 No Content"}))
 
 @app.route('/send-peer', methods=['POST'])
 def send_peer(headers, body):
@@ -205,20 +308,22 @@ def send_peer(headers, body):
             from_user = payload.get("from")
             msg = payload.get("message")
             CHAT_HISTORY.append({"from": from_user, "message": msg, "type": "direct"})
-            return (json.dumps({"status": "delivered"}).encode("utf-8"), {"Content-Type": "application/json"})
+            return (json.dumps({"status": "delivered"}).encode("utf-8"), json_headers())
         
         # Gửi tin nhắn đi (OUTBOUND) từ Trình duyệt User -> Gọi sang Peer khác
         elif req_type == "outbound":
             username = check_auth(headers)
             if not username:
-                return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), {"Status": "401 Unauthorized", "Content-Type": "application/json"})
+                return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), json_headers({"Status": "401 Unauthorized"}))
             
             target_user = payload.get("target")
             msg = payload.get("message")
             
             # Tra cứu IP/Port từ PEERS đã lưu
             if target_user not in PEERS:
-                return (json.dumps({"error": "Target user not found"}).encode("utf-8"), {"Status": "404 Not Found", "Content-Type": "application/json"})
+                return (json.dumps({"error": "Target user not found"}).encode("utf-8"), json_headers({"Status": "404 Not Found"}))
+            if not PEERS[target_user].get("online", False):
+                return (json.dumps({"error": "Target user is offline"}).encode("utf-8"), json_headers({"Status": "409 Conflict"}))
             
             target_ip = PEERS[target_user]["ip"]
             target_port = PEERS[target_user]["port"]
@@ -234,19 +339,25 @@ def send_peer(headers, body):
                 res = urllib.request.urlopen(req, timeout=3)
                 if res.getcode() == 200:
                     CHAT_HISTORY.append({"from": username, "to": target_user, "message": msg, "type": "direct_sent"})
-                    return (json.dumps({"status": "sent to peer"}).encode("utf-8"), {"Content-Type": "application/json"})
+                    return (json.dumps({"status": "sent to peer"}).encode("utf-8"), json_headers())
             except urllib.error.URLError as e:
-                return (json.dumps({"error": f"Failed reaching peer: {str(e)}"}).encode("utf-8"), {"Status": "503 Service Unavailable", "Content-Type": "application/json"})
+                mark_peer_offline(target_user)
+                return (json.dumps({"error": f"Failed reaching peer: {str(e)}"}).encode("utf-8"), json_headers({"Status": "503 Service Unavailable"}))
                 
-        return (json.dumps({"error": "Invalid internal format"}).encode("utf-8"), {"Status": "400 Bad Request", "Content-Type": "application/json"})
+        return (json.dumps({"error": "Invalid internal format"}).encode("utf-8"), json_headers({"Status": "400 Bad Request"}))
     except Exception as e:
-        return (json.dumps({"error": str(e)}).encode("utf-8"), {"Status": "400 Bad Request", "Content-Type": "application/json"})
+        return (json.dumps({"error": str(e)}).encode("utf-8"), json_headers({"Status": "400 Bad Request"}))
+
+
+@app.route('/send-peer', methods=['OPTIONS'])
+def send_peer_options(headers, body):
+    return (b"", json_headers({"Status": "204 No Content"}))
 
 @app.route('/broadcast-peer', methods=['POST'])
 def broadcast_peer(headers, body):
     username = check_auth(headers)
     if not username:
-        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), {"Status": "401 Unauthorized", "Content-Type": "application/json"})
+        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), json_headers({"Status": "401 Unauthorized"}))
     
     try:
         payload = json.loads(body)
@@ -256,6 +367,8 @@ def broadcast_peer(headers, body):
         for peer_uname, peer_info in PEERS.items():
             if peer_uname == username:
                 continue # Không gửi cho chính mình
+            if not peer_info.get("online", False):
+                continue
                 
             try:
                 url = f"http://{peer_info['ip']}:{peer_info['port']}/send-peer"
@@ -267,20 +380,31 @@ def broadcast_peer(headers, body):
                 if res.getcode() == 200:
                     success_count += 1
             except:
+                mark_peer_offline(peer_uname)
                 pass # Bỏ qua peer bị offline
                 
         CHAT_HISTORY.append({"from": username, "to": "ALL", "message": msg, "type": "broadcast_sent"})
-        return (json.dumps({"status": "broadcasted", "success_peers": success_count}).encode("utf-8"), {"Content-Type": "application/json"})
+        return (json.dumps({"status": "broadcasted", "success_peers": success_count}).encode("utf-8"), json_headers())
     except Exception as e:
-        return (json.dumps({"error": str(e)}).encode("utf-8"), {"Status": "400 Bad Request", "Content-Type": "application/json"})
+        return (json.dumps({"error": str(e)}).encode("utf-8"), json_headers({"Status": "400 Bad Request"}))
+
+
+@app.route('/broadcast-peer', methods=['OPTIONS'])
+def broadcast_peer_options(headers, body):
+    return (b"", json_headers({"Status": "204 No Content"}))
 
 @app.route('/get-messages', methods=['GET'])
 def get_messages(headers, body):
     username = check_auth(headers)
     if not username:
-        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), {"Status": "401 Unauthorized", "Content-Type": "application/json"})
+        return (json.dumps({"error": "Unauthorized"}).encode("utf-8"), json_headers({"Status": "401 Unauthorized"}))
     
-    return (json.dumps({"history": CHAT_HISTORY}).encode("utf-8"), {"Content-Type": "application/json"})
+    return (json.dumps({"history": CHAT_HISTORY}).encode("utf-8"), json_headers())
+
+
+@app.route('/get-messages', methods=['OPTIONS'])
+def get_messages_options(headers, body):
+    return (b"", json_headers({"Status": "204 No Content"}))
 
 # ==========================================
 # GIAI ĐOẠN 5: FRONTEND STATIC ROUTES
@@ -314,7 +438,8 @@ def serve_js(headers, body):
     try:
         with open("static/js/app.js", "r", encoding="utf-8") as f:
             return (f.read().encode("utf-8"), {"Content-Type": "application/javascript"})
-    except:
+    except Exception as e:
+        print("ERROR loading app.js:", e)
         return (b"404 Not Found", {"Status": "404 Not Found"})
 
 def create_sampleapp(ip, port):

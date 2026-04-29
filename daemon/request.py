@@ -142,7 +142,7 @@ class Request():
 
     def prepare_body(self, data, files, json=None):
         self.prepare_content_length(self.body)
-        self.body = body
+        self.body = data
         #
         # TODO prepare the request authentication
         #
