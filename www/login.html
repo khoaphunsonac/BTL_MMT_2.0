@@ -66,12 +66,12 @@
                 return;
             }
 
-            localStorage.setItem("node_ip", nodeIp);
-            localStorage.setItem("node_port", port);
-            localStorage.setItem("tracker_ip", trackerIp);
-            localStorage.setItem("tracker_port", trackerPort);
-            localStorage.setItem("public_ip", publicIp);
-            localStorage.setItem("username", u);
+            sessionStorage.setItem("node_ip", nodeIp);
+            sessionStorage.setItem("node_port", port);
+            sessionStorage.setItem("tracker_ip", trackerIp);
+            sessionStorage.setItem("tracker_port", trackerPort);
+            sessionStorage.setItem("public_ip", publicIp);
+            sessionStorage.setItem("username", u);
 
             try {
                 const res = await fetch(`http://${nodeIp}:${port}/login`, {
@@ -82,7 +82,7 @@
                 if (res.status === 200) {
                     const data = await res.json();
                     const token = data.session_id;
-                    localStorage.setItem("session_token", token);
+                    sessionStorage.setItem("session_token", token);
 
                     let trackerToken = token;
                     if (trackerIp !== nodeIp || trackerPort !== port) {
@@ -101,7 +101,7 @@
                         trackerToken = trackerData.session_id;
                     }
 
-                    localStorage.setItem("tracker_token", trackerToken);
+                    sessionStorage.setItem("tracker_token", trackerToken);
 
                     const submitRes = await fetch(`http://${trackerIp}:${trackerPort}/submit-info`, {
                         method: 'POST',

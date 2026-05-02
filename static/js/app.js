@@ -1,12 +1,12 @@
 // Retrieve config from Login pass
-const nodeIp = localStorage.getItem("node_ip") || "127.0.0.1";
-const port = localStorage.getItem("node_port");
-const trackerIp = localStorage.getItem("tracker_ip") || nodeIp;
-const trackerPort = localStorage.getItem("tracker_port") || port;
-const publicIp = localStorage.getItem("public_ip") || nodeIp;
-const token = localStorage.getItem("session_token");
-const trackerToken = localStorage.getItem("tracker_token") || token;
-const username = localStorage.getItem("username");
+const nodeIp = sessionStorage.getItem("node_ip") || "127.0.0.1";
+const port = sessionStorage.getItem("node_port");
+const trackerIp = sessionStorage.getItem("tracker_ip") || nodeIp;
+const trackerPort = sessionStorage.getItem("tracker_port") || port;
+const publicIp = sessionStorage.getItem("public_ip") || nodeIp;
+const token = sessionStorage.getItem("session_token");
+const trackerToken = sessionStorage.getItem("tracker_token") || token;
+const username = sessionStorage.getItem("username");
 
 if (!port || !token) {
     window.location.href = "login.html";
@@ -282,14 +282,14 @@ async function logoutUser() {
         // Local node logout is best-effort if tracker is separate.
     }
 
-    localStorage.removeItem("session_token");
-    localStorage.removeItem("tracker_token");
-    localStorage.removeItem("node_ip");
-    localStorage.removeItem("node_port");
-    localStorage.removeItem("tracker_ip");
-    localStorage.removeItem("tracker_port");
-    localStorage.removeItem("public_ip");
-    localStorage.removeItem("username");
+    sessionStorage.removeItem("session_token");
+    sessionStorage.removeItem("tracker_token");
+    sessionStorage.removeItem("node_ip");
+    sessionStorage.removeItem("node_port");
+    sessionStorage.removeItem("tracker_ip");
+    sessionStorage.removeItem("tracker_port");
+    sessionStorage.removeItem("public_ip");
+    sessionStorage.removeItem("username");
     window.location.href = "login.html";
 }
 
